@@ -1,0 +1,28 @@
+server:
+  listen: "0.0.0.0:8080"
+  ffmpeg_binary: "ffmpeg"
+  supervisor_interval_ms: 2000
+  # Windows 建议使用临时目录
+  hls_root: "./temp/hls"
+
+streams:
+  - name: "cam01"
+    source: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    auto_start: true
+    idle_timeout: 30
+    output_args:
+      - "-c:v"
+      - "copy"
+      - "-c:a"
+      - "copy"
+      - "-f"
+      - "hls"
+      - "-hls_time"
+      - "4"
+      - "-hls_list_size"
+      - "5"
+      - "{output_dir}/index.m3u8"
+    retry:
+      max_attempts: 5
+      initial_backoff_sec: 2
+      max_backoff_sec: 60

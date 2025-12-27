@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTX Link Admin</title>
+    <style>
+        :root { --primary: #0078d4; --bg: #f8f9fa; --text: #323130; --border: #edebe9; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; line-height: 1.5; }
+
+        /* 顶部导航栏 */
+        .header { background: #201f1e; color: white; padding: 0 20px; height: 50px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header-title { font-weight: 600; font-size: 16px; letter-spacing: 0.5px; }
+        .sys-stat { font-size: 13px; color: #d0d0d0; font-family: monospace; }
+
+        /* 主容器 */
+        .container { padding: 20px; max-width: 900px; margin: auto; }
+
+        /* 卡片样式 */
+        .card { background: white; border: 1px solid var(--border); border-left: 4px solid transparent; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.2s; border-radius: 4px; }
+        .card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+
+        /* 状态边框颜色 */
+        .card.status-running { border-left-color: #107c10; }
+        .card.status-stopped { border-left-color: #a19f9d; }
+        .card.status-crashed { border-left-color: #d13438; }
+
+        /* 徽章 */
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; margin-left: 8px; vertical-align: middle; }
+        .badge.run { background: #dff6dd; color: #107c10; }
+        .badge.stop { background: #f3f2f1; color: #605e5c; }
+        .badge.crash { background: #fde7e9; color: #a4262c; }
+
+        /* 文本排版 */
+        .stream-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; }
+        .stream-meta { font-size: 12px; color: #605e5c; margin-top: 6px; }
+        .meta-item { margin-right: 15px; display: inline-flex; align-items: center; }
+        .meta-icon { margin-right: 4px; opacity: 0.7; }
+
+        /* 按钮组 */
+        .btn-group { display: flex; gap: 8px; }
+        .btn { border: none; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 13px; font-weight: 500; transition: background 0.1s; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #005a9e; }
+
+        .btn-danger { background: #fde7e9; color: #a4262c; }
+        .btn-danger:hover { background: #fdd9db; }
+
+        /* 加载与错误提示 */
+        .loading { text-align: center; color: #605e5c; padding: 40px; }
+        .error-msg { background: #fde7e9; color: #a4262c; padding: 10px; border-radius: 4px; margin-bottom: 20px; text-align: center; display: none; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="header-title">VTX Link <span style="font-weight:400; opacity:0.7">| Edge Gateway</span></div>
+    <div class="sys-stat" id="mem-info">Connecting...</div>
+</div>
+
+<div class="container">
+    <div id="error-banner" class="error-msg"></div>
+    <div id="stream-list">
+        <div class="loading">正在连接网关...</div>
+    </div>
+</div>
+
+<script>
+    // 格式化时间辅助函数 (秒 -> 易读格式)
+    function formatTime(seconds) {
+        if (seconds < 60) return `${seconds}s`;
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return (h > 0 ? `${h}h ` : "") + (m > 0 ? `${m}m ` : "") + `${s}s`;
+    }
+
+    // 状态映射辅助函数
+    function getStatusClass(s) {
+        if (s.status === 'running') return 'status-running';
+        if (s.crash_count > 0 && s.status !== 'running') return 'status-crashed';
+        return 'status-stopped';
+    }
+
+    async function update() {
+        try {
+            // 1. 获取流列表数据
+            const sRes = await fetch('/streams');
+            if (!sRes.ok) throw new Error("API Error");
+            const { streams } = await sRes.json();
+
+            // 2. 渲染流卡片
+            const html = streams.map(s => {
+                // 构建徽章
+                let badges = '';
+                if (s.status === 'running') {
+                    badges += `<span class="badge run">RUNNING</span>`;
+                } else {
+                    badges += `<span class="badge stop">STOPPED</span>`;
+                }
+
+                // 崩溃警告徽章
+                if (s.crash_count > 0) {
+                    badges += `<span class="badge crash">CRASH: ${s.crash_count}</span>`;
+                }
+
+                // 构建详情行
+                let details = `
+                    <span class="meta-item" title="Source URL">📺 ${s.source}</span>
+                `;
+
+                if (s.status === 'running') {
+                    details += `
+                        <br>
+                        <span class="meta-item" title="Uptime">⏱️ 运行时长: ${formatTime(s.uptime_seconds)}</span>
+                        <span class="meta-item" title="Idle Time">💤 闲置: ${s.idle_seconds}s / ${s.config_idle_timeout}s</span>
+                    `;
+                }
+
+                return `
+                    <div class="card ${getStatusClass(s)}">
+                        <div>
+                            <div class="stream-name">${s.name} ${badges}</div>
+                            <div class="stream-meta">${details}</div>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="act('${s.name}','start')">
+                                ${s.status === 'running' ? '重启 / 刷新' : '启动'}
+                            </button>
+                            <button class="btn btn-danger" onclick="act('${s.name}','stop')">停止</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('stream-list').innerHTML = html;
+            document.getElementById('error-banner').style.display = 'none';
+
+            // 3. 获取系统资源状态
+            const mRes = await fetch('/sys/status');
+            if (mRes.ok) {
+                const m = await mRes.json();
+                // 简单的内存条可视化
+                const memPercent = Math.round(((m.mem_total - m.mem_avail) / m.mem_total) * 100);
+                document.getElementById('mem-info').innerHTML = `
+                        RAM: ${m.mem_avail}MB Free | Load: ${m.load_avg.toFixed(2)}
+                    `;
+            }
+
+        } catch (e) {
+            console.error("Connection lost", e);
+            document.getElementById('error-banner').innerText = "无法连接到网关服务，请检查网络或服务状态。";
+            document.getElementById('error-banner').style.display = 'block';
+            document.getElementById('mem-info').innerText = "OFFLINE";
+        }
+    }
+
+    // 按钮操作逻辑
+    async function act(name, op) {
+        try {
+            // 添加简单的点击反馈
+            const btn = event.target;
+            const originText = btn.innerText;
+            btn.innerText = "...";
+            btn.disabled = true;
+
+            await fetch(`/streams/${name}/${op}`, { method: 'POST' });
+
+            // 操作后立即刷新一次
+            await update();
+        } catch (e) {
+            alert("操作失败: " + e);
+        }
+    }
+
+    // 启动轮询
+    setInterval(update, 2000);
+    // 首次加载
+    update();
+</script>
+</body>
+</html>
