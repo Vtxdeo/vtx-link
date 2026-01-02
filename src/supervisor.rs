@@ -43,7 +43,11 @@ pub async fn start_supervisor(state: Arc<AppState>, interval_ms: u64) {
                         let idle_dur = now.duration_since(runtime.last_accessed);
                         if idle_dur.as_secs() > cfg.idle_timeout {
                             // 如果空闲超过配置的超时，安排停止流
-                            info!("Stream [{}] idle for {}s. Scheduling stop.", name, idle_dur.as_secs());
+                            info!(
+                                "Stream [{}] idle for {}s. Scheduling stop.",
+                                name,
+                                idle_dur.as_secs()
+                            );
                             streams_to_kill.push(name.clone());
                         }
                     }
@@ -64,41 +68,52 @@ pub async fn start_supervisor(state: Arc<AppState>, interval_ms: u64) {
         // --- 阶段 3: 故障恢复 (Backoff) ---
         for name in streams_crashed {
             let mut recovery_map = state.recovery_states.lock().unwrap();
-            let recovery = recovery_map.entry(name.clone()).or_insert(StreamRecoveryState {
-                crash_count: 0,
-                next_retry_at: None,
-            });
+            let recovery = recovery_map
+                .entry(name.clone())
+                .or_insert(StreamRecoveryState {
+                    crash_count: 0,
+                    next_retry_at: None,
+                });
 
             if let Some(cfg) = state.config.streams.iter().find(|s| s.name == name) {
                 // 检查最大重试次数
                 if cfg.retry.max_attempts > 0 && recovery.crash_count >= cfg.retry.max_attempts {
                     // 如果达到最大重试次数，则放弃重试
-                    error!("Stream [{}] reached max retry attempts ({}). Giving up.", name, cfg.retry.max_attempts);
+                    error!(
+                        "Stream [{}] reached max retry attempts ({}). Giving up.",
+                        name, cfg.retry.max_attempts
+                    );
                     continue;
                 }
 
                 // 计算回退时间（基于指数退避算法）
                 let backoff_sec = std::cmp::min(
                     cfg.retry.max_backoff_sec,
-                    cfg.retry.initial_backoff_sec * 2u64.pow(recovery.crash_count)
+                    cfg.retry.initial_backoff_sec * 2u64.pow(recovery.crash_count),
                 );
 
                 recovery.crash_count += 1;
                 recovery.next_retry_at = Some(now + Duration::from_secs(backoff_sec));
 
                 // 记录警告，说明流崩溃并开始回退
-                warn!("Stream [{}] crashed. Retry {}/{}. Backing off for {}s.",
-                    name, recovery.crash_count, cfg.retry.max_attempts, backoff_sec);
+                warn!(
+                    "Stream [{}] crashed. Retry {}/{}. Backing off for {}s.",
+                    name, recovery.crash_count, cfg.retry.max_attempts, backoff_sec
+                );
             }
         }
 
         // --- 阶段 4: 尝试重启流任务 ---
         for cfg in &state.config.streams {
-            if !cfg.auto_start { continue; } // 如果配置中不允许自动启动，跳过
+            if !cfg.auto_start {
+                continue;
+            } // 如果配置中不允许自动启动，跳过
 
             // 检查流是否已在运行
             let is_running = state.active_streams.lock().unwrap().contains_key(&cfg.name);
-            if is_running { continue; }
+            if is_running {
+                continue;
+            }
 
             let mut should_start = true;
             {
