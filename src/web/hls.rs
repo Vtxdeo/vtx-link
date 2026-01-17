@@ -18,7 +18,7 @@ pub async fn serve_hls_file(
     // 1. Trigger stream startup logic for .m3u8 or keep-alive logic for .ts
     if file_name.ends_with(".m3u8") {
         // Start stream if it's a .m3u8 file
-        let _ = Engine::start_stream(&state, &stream_name)
+        Engine::start_stream(&state, &stream_name)
             .await
             .map_err(|e| {
                 // Log error if stream startup fails
